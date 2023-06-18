@@ -1,0 +1,97 @@
+#include <Wire.h>
+#include <Adafruit_Sensor.h>
+#include <Adafruit_BMP085.h>
+#include <Adafruit_LSM303_U.h>
+#include <Adafruit_L3GD20_U.h>
+#include <Adafruit_GPS.h>
+#include <SoftwareSerial.h>
+#include <SPI.h>
+#include <RF24.h>
+
+#define CE_PIN   9
+#define CSN_PIN 10
+
+RF24 radio(CE_PIN, CSN_PIN);
+
+struct SensorData {
+  float temperature;
+  float pressure1;
+  float altitude1;
+  float ax;
+  float ay;
+  float az;
+  float gx;
+  float gy;
+  float gz;
+  float latitude1;
+  float longitude1;
+};
+
+Adafruit_BMP085 bmp;
+Adafruit_LSM303_Accel_Unified accel;
+Adafruit_L3GD20_Unified gyro;
+SoftwareSerial gpsSerial(4, 3);
+Adafruit_GPS GPS(&gpsSerial);
+
+void setup() {
+  // Initialize serial ports
+  Serial.begin(9600);
+  gpsSerial.begin(9600);
+
+  // Initialize sensors
+  if (!bmp.begin()) {
+    Serial.println("No se pudo encontrar el sensor BMP085.");
+    while (1);
+  }
+
+  if (!accel.begin()) {
+    Serial.println("No se pudo encontrar el sensor LSM303.");
+    while (1);
+  }
+
+  if (!gyro.begin()) {
+    Serial.println("No se pudo encontrar el sensor L3GD20.");
+    while (1);
+  }
+
+  // Initialize RF24 library
+  radio.begin();
+  radio.setPALevel(RF24_PA_HIGH);
+  radio.openWritingPipe(0xF0F0F0F0E1LL);
+}
+
+void loop() {
+  // Read sensor data
+  sensors_event_t event;
+  SensorData data;
+
+  bmp.readTemperature();
+  data.temperature = event.temperature;
+  bmp.readPressure();
+  data.pressure1 = event.pressure;
+  data.altitude1 = bmp.readAltitude(101325);
+  accel.getEvent(&event);
+  data.ax = event.acceleration.x;
+  data.ay = event.acceleration.y;
+  data.az = event.acceleration.z;
+  gyro.getEvent(&event);
+  data.gx = event.gyro.x;
+  data.gy = event.gyro.y;
+  data.gz = event.gyro.z;
+
+  while (gpsSerial.available()) {
+    int c = gpsSerial.read();
+    if (GPS.parse(c)) {
+      if (GPS.fix) {
+        data.latitude1 = GPS.latitudeDegrees;
+        data.longitude1 = GPS.longitudeDegrees;
+      }
+    }
+  }
+
+  // Send sensor data over RF24
+  radio.write(&data, sizeof(data));
+
+  // Delay
+  delay(1000);
+}
